@@ -907,56 +907,106 @@ int varint_encode(unsigned char *p, uint64_t n)
 	return 9;
 }
 
-static const char b58digits[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+// static const char b58digits[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+// static bool b58dec(unsigned char *bin, size_t binsz, const char *b58)
+// {
+// 	size_t i, j;
+// 	uint64_t t;
+// 	uint32_t c;
+// 	uint32_t *outi;
+// 	size_t outisz = (binsz + 3) / 4;
+// 	int rem = binsz % 4;
+// 	uint32_t remmask = 0xffffffff << (8 * rem);
+// 	size_t b58sz = strlen(b58);
+// 	bool rc = false;
+
+// 	outi = (uint32_t *) calloc(outisz, sizeof(*outi));
+
+// 	for (i = 0; i < b58sz; ++i) {
+// 		for (c = 0; b58digits[c] != b58[i]; c++)
+// 			if (!b58digits[c])
+// 				goto out;
+// 		for (j = outisz; j--; ) {
+// 			t = (uint64_t)outi[j] * 58 + c;
+// 			c = t >> 32;
+// 			outi[j] = t & 0xffffffff;
+// 		}
+// 		if (c || outi[0] & remmask)
+// 			goto out;
+// 	}
+
+// 	j = 0;
+// 	switch (rem) {
+// 		case 3:
+// 			*(bin++) = (outi[0] >> 16) & 0xff;
+// 		case 2:
+// 			*(bin++) = (outi[0] >> 8) & 0xff;
+// 		case 1:
+// 			*(bin++) = outi[0] & 0xff;
+// 			++j;
+// 		default:
+// 			break;
+// 	}
+// 	for (; j < outisz; ++j) {
+// 		be32enc((uint32_t *)bin, outi[j]);
+// 		bin += sizeof(uint32_t);
+// 	}
+
+// 	rc = true;
+// out:
+// 	free(outi);
+// 	return rc;
+// }
+
+static const int b58tobin_tbl[] = {
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1,  0,  1,  2,  3,  4,  5,  6,  7,  8, -1, -1, -1, -1, -1, -1,
+	-1,  9, 10, 11, 12, 13, 14, 15, 16, -1, 17, 18, 19, 20, 21, -1,
+	22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, -1, -1, -1, -1, -1,
+	-1, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, -1, 44, 45, 46,
+	47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57
+};
 
 static bool b58dec(unsigned char *bin, size_t binsz, const char *b58)
 {
-	size_t i, j;
-	uint64_t t;
-	uint32_t c;
-	uint32_t *outi;
-	size_t outisz = (binsz + 3) / 4;
-	int rem = binsz % 4;
-	uint32_t remmask = 0xffffffff << (8 * rem);
-	size_t b58sz = strlen(b58);
-	bool rc = false;
+    uint32_t c, bin32[7];
+    uint64_t t;
+    int len, i, j;
 
-	outi = (uint32_t *) calloc(outisz, sizeof(*outi));
+    // Validate output buffer size
+    if (binsz < 25) {
+        return false;
+    }
 
-	for (i = 0; i < b58sz; ++i) {
-		for (c = 0; b58digits[c] != b58[i]; c++)
-			if (!b58digits[c])
-				goto out;
-		for (j = outisz; j--; ) {
-			t = (uint64_t)outi[j] * 58 + c;
-			c = t >> 32;
-			outi[j] = t & 0xffffffff;
-		}
-		if (c || outi[0] & remmask)
-			goto out;
-	}
+    // Initialize intermediate binary storage
+    memset(bin32, 0, sizeof(bin32));
+    len = strlen(b58);
 
-	j = 0;
-	switch (rem) {
-		case 3:
-			*(bin++) = (outi[0] >> 16) & 0xff;
-		case 2:
-			*(bin++) = (outi[0] >> 8) & 0xff;
-		case 1:
-			*(bin++) = outi[0] & 0xff;
-			++j;
-		default:
-			break;
-	}
-	for (; j < outisz; ++j) {
-		be32enc((uint32_t *)bin, outi[j]);
-		bin += sizeof(uint32_t);
-	}
+    // Decode Base58 string
+    for (i = 0; i < len; i++) {
+        c = b58[i];
+        c = b58tobin_tbl[c]; // Use lookup table for decoding
+        if (c == (uint32_t)-1) {
+            return false; // Invalid character
+        }
+        for (j = 6; j >= 0; j--) {
+            t = ((uint64_t)bin32[j]) * 58 + c;
+            c = (t & 0x3f00000000ull) >> 32;
+            bin32[j] = t & 0xffffffffull;
+        }
+    }
 
-	rc = true;
-out:
-	free(outi);
-	return rc;
+    // Convert decoded binary to output format
+    *(bin++) = bin32[0] & 0xff;
+    for (i = 1; i < 7; i++) {
+        *((uint32_t *)bin) = htobe32(bin32[i]);
+        bin += sizeof(uint32_t);
+    }
+
+    return true;
 }
 
 static int b58check(unsigned char *bin, size_t binsz, const char *b58)
@@ -1132,44 +1182,74 @@ static size_t bech32_to_script(uint8_t *out, size_t outsz, const char *addr) {
     return witprog_len + 2;
 }
 
-size_t address_to_script( unsigned char *out, size_t outsz, const char *addr )
+// size_t address_to_script( unsigned char *out, size_t outsz, const char *addr )
+// {
+// 	unsigned char addrbin[ pk_buffer_size_max ];
+// 	int addrver;
+// 	size_t rv;
+
+// 	if ( !b58dec( addrbin, outsz, addr ) )
+// 		return bech32_to_script( out, outsz, addr );
+
+//    addrver = b58check( addrbin, outsz, addr );
+//    if ( addrver < 0 )
+// 		return 0;
+
+//    if ( opt_debug )
+//       applog( LOG_INFO, "Coinbase address uses B58 coding");
+
+//    switch ( addrver )
+//    {
+// 		case 5:    /* Bitcoin script hash */
+// 		case 196:  /* Testnet script hash */
+// 			if ( outsz < ( rv = 23 ) )
+// 				return rv;
+// 			out[ 0] = 0xa9;  /* OP_HASH160 */
+// 			out[ 1] = 0x14;  /* push 20 bytes */
+// 			memcpy( &out[2], &addrbin[1], 20 );
+// 			out[22] = 0x87;  /* OP_EQUAL */
+// 			return rv;
+// 		default:
+// 			if (outsz < (rv = 25))
+// 				return rv;
+// 			out[ 0] = 0x76;  /* OP_DUP */
+// 			out[ 1] = 0xa9;  /* OP_HASH160 */
+// 			out[ 2] = 0x14;  /* push 20 bytes */
+// 			memcpy( &out[3], &addrbin[1], 20 );
+// 			out[23] = 0x88;  /* OP_EQUALVERIFY */
+// 			out[24] = 0xac;  /* OP_CHECKSIG */
+// 			return rv;
+// 	}
+// }
+
+size_t address_to_script(unsigned char *out, size_t outsz, const char *addr)
 {
-	unsigned char addrbin[ pk_buffer_size_max ];
-	int addrver;
-	size_t rv;
+    unsigned char b58bin[25];
 
-	if ( !b58dec( addrbin, outsz, addr ) )
-		return bech32_to_script( out, outsz, addr );
+    // Ensure output buffer size is sufficient
+    if (outsz < 25) {
+        return 25; // Return the required size
+    }
 
-   addrver = b58check( addrbin, outsz, addr );
-   if ( addrver < 0 )
-		return 0;
+    // Initialize b58bin to zero
+    memset(b58bin, 0, sizeof(b58bin));
 
-   if ( opt_debug )
-      applog( LOG_INFO, "Coinbase address uses B58 coding");
+    // Convert Base58 address to binary representation
+    b58dec(b58bin, sizeof(b58bin), addr);
+	printf("addrbin: hex: %s\n", abin2hex(b58bin, sizeof(b58bin)));
 
-   switch ( addrver )
-   {
-		case 5:    /* Bitcoin script hash */
-		case 196:  /* Testnet script hash */
-			if ( outsz < ( rv = 23 ) )
-				return rv;
-			out[ 0] = 0xa9;  /* OP_HASH160 */
-			out[ 1] = 0x14;  /* push 20 bytes */
-			memcpy( &out[2], &addrbin[1], 20 );
-			out[22] = 0x87;  /* OP_EQUAL */
-			return rv;
-		default:
-			if (outsz < (rv = 25))
-				return rv;
-			out[ 0] = 0x76;  /* OP_DUP */
-			out[ 1] = 0xa9;  /* OP_HASH160 */
-			out[ 2] = 0x14;  /* push 20 bytes */
-			memcpy( &out[3], &addrbin[1], 20 );
-			out[23] = 0x88;  /* OP_EQUALVERIFY */
-			out[24] = 0xac;  /* OP_CHECKSIG */
-			return rv;
-	}
+	b58check(b58bin, 25, addr);
+
+    // Construct the pubkey hash script
+    out[0] = 0x76;                // OP_DUP
+    out[1] = 0xa9;                // OP_HASH160
+    out[2] = 0x14;                // Push 20 bytes
+    memcpy(&out[3], &b58bin[1], 20); // Copy 20 bytes of the pubkey hash
+    out[23] = 0x88;               // OP_EQUALVERIFY
+    out[24] = 0xac;               // OP_CHECKSIG
+
+    // Return the size of the generated script
+    return 25;
 }
 
 /* Subtract the `struct timeval' values X and Y,
